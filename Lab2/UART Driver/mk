@@ -1,0 +1,27 @@
+# 1. What does the following statement do?___________________________________
+arm-none-eabi-as -mcpu=arm926ej-s -g -w ts.s -o ts.o
+# assembles the ts.s file into an object file called ts.o
+
+# 2. What does the following statement do?___________________________________
+arm-none-eabi-gcc -c -mcpu=arm926ej-s -w -g t.c -o t.o
+# compiles the t.c to t.o using the gcc compiler
+
+# 3. What does the following statement do?___________________________________
+arm-none-eabi-ld -T t.ld ts.o t.o -o t.elf
+#links the files t.o and ts.o into t.elf
+
+# 4. What does the following statement do?___________________________________
+arm-none-eabi-objcopy -O binary t.elf t.bin
+# creates a binary from the file t.elf called t.bin
+
+rm *.o *.elf
+# remove all object files and files ending in .elf extension
+
+echo ready to go?
+read dummy
+
+#qemu-system-arm -M versatilepb -m 128M -kernel t.bin \
+#-serial mon:stdio -serial /dev/pts/0
+
+qemu-system-arm -M realview-pbx-a9 -m 128M -kernel t.bin \
+-serial mon:stdio -serial /dev/pts/1 -serial /dev/pts/2 -serial /dev/pts/3

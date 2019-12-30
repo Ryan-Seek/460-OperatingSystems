@@ -1,0 +1,906 @@
+//CP.C
+
+#include "ucode.c"
+
+int main(int argc, char *argv[]) {
+	int n;
+	char buf[1024];
+	int src = open(argv[1], 0);
+	int dest = open(argv[2], 1);
+
+	if(src < 0)
+		return -1;
+
+
+	if(dest < 0)
+	{
+		creat(argv[2]);
+		dest = open(argv[2], 1);
+	}
+
+	while( (n = read(src, buf, 1024)) )
+		write(dest, buf, n);
+
+	close(src);
+	close(dest);
+}
+
+//GREP.C
+
+#include "ucode.c"
+
+#define NUMLINES 128
+
+int clearstr(char *str)
+{
+	int i;
+	for (i = 0; i < NUMLINES; i++)
+		str[i] = 0;
+
+	return 0;
+}
+
+int checkline(char *str, char *pattern, int patternsize)
+{
+	int i;
+
+	while(*(str + patternsize - 1)) {
+		if(*str == *pattern) 
+		{
+			for(i = 0; i < patternsize; i++) 
+			{
+				if(str[i] == pattern[i])
+					continue;
+				else
+					break;
+			}
+
+			if(i == patternsize)
+				return 1;
+		}
+		str++;
+	}
+	return 0;
+}
+
+
+int main(int argc, char *argv[])
+{
+	int fd, patternsize, i, reader, linenum = 0;
+	char line[1024];
+	int searching = 1;
+
+	if (argc == 1) 
+		exit(1);
+
+	else if (argc == 2)
+		fd = 0;
+
+	else
+		fd = open(argv[2], O_RDONLY);
+
+	if (fd >= 0) {
+		patternsize = strlen(argv[1]);
+		while (searching)
+		{
+			clearstr(line);
+
+			for (i = 0; i < NUMLINES - 1; i++)
+			{
+				reader = read(fd, &line[i], 1);
+
+				if (reader < 1)
+				{
+					searching = 0;
+					break;
+				}
+				if (line[i] == '\n')
+				{
+					line[i] = 0;
+					break;
+				}
+				if (line[i] == '\r')
+				{
+					line[i + 1] = 0;
+					break;
+				}
+				if (line[i] == 0)
+				{
+					searching = 0; 
+					break;
+				}
+			}
+
+			linenum++;
+			if (searching && checkline(line, argv[1], patternsize))
+				printf("Found match at line %d (%s)\n", linenum / 2 + 1, line);
+		}
+	}
+	else
+		exit(-1);
+
+
+	close(fd);
+	exit(1);
+}
+
+
+
+//INIT.C
+
+#include "ucode.c"
+
+int console, serial0, serial1;
+
+int parent()
+{
+    int pid, status;
+    while(1)
+    {
+        pid = wait(&status);
+
+        if(pid == console)//if console login proccess died
+        {
+            console = fork();
+
+            if(console)
+                continue;
+            else
+                exec("login /dev/tty0");//new console login process
+        }
+        if(pid == serial0)//ttyS0 login process
+        {
+            serial0 = fork();
+
+            if(serial0)
+                continue;
+            else
+                exec("login /dev/ttyS0");//new login process
+
+        }
+        if(pid == serial1)//ttyS1 login process
+        {
+            serial1 = fork();
+
+            if(serial1)
+                continue;
+            else
+                exec("login /dev/ttyS1");//new login process
+        }
+    }
+}
+
+int main(int argc, char *argv[ ])
+{
+    int in, out;
+    in = open("/dev/tty0", O_RDONLY);//open file descriptors for console so we can read and write to it
+    out = open("/dev/tty0", O_WRONLY);
+
+    console = fork();
+
+    if(console)//if console is non-zero then it's the parent PROC
+    {
+        serial0 = fork();
+        if(serial0)
+        {
+            serial1 = fork();
+
+            if(serial1)
+                parent();
+            else
+                exec("login /dev/ttyS1");
+        }
+        else
+            exec("login /dev/ttyS0");
+    }
+    else//else its the child PROC, thus login on tty0
+        exec("login /dev/tty0");
+}
+
+//CAT.C
+
+#include "ucode.c"
+
+int main(int argc, char *argv[ ])
+{
+    char buf1[1024], c;
+    int fd, n, i = 0;
+
+    if(argc > 1)
+    {
+        fd = open(argv[1], O_RDONLY);
+        if(fd >= 0)
+        {
+            while((n = read(fd, buf1, 1024)))
+            {
+                for(i = 0; i < n; i++)
+                {
+                    write(1, &buf1[i], 1);
+                    if(buf1[i] == '\n')
+                        write(1, "\r", 1);
+                }
+            }
+            close(fd);
+        }
+    }
+    else
+    {
+        while(1)
+        {
+            n = read(0, &c, 1);
+
+            if(n < 1)
+                break;
+
+            if(c == '\r')
+            {
+                write(1, buf1, i);
+                memset(buf1, 0, 1024);
+                i = -1;
+                write(1, "\n\r", 2);
+            }
+
+            else
+                buf1[i] = c;
+            i++;
+        }
+    }
+
+}
+
+//LOGIN.C
+
+#include "ucode.c"
+
+
+int main(int argc, char *argv[ ])
+{
+    int in, out, err, fd, count, i = 0, r = 0, un = 0, p = 0;
+    char username[64], password[64], buf1[1024], hold[1024];
+    char uname[64], pass[64];
+    char token[64];
+
+    close(0);
+    close(1);
+
+    in = open(argv[1], 0);
+    out = open(argv[1], 1);
+    err = open(argv[1], 2);
+    
+    fixtty(argv[1]);
+
+    fd = open("/etc/passwd", O_RDONLY);
+
+
+    count = read(fd, buf1, 1024);
+    strcpy(hold, buf1);
+
+    while(1)
+    {
+        i = 0;
+        prints("Username: ");
+        gets(username);
+        prints("Password: ");
+        gets(password);
+
+        while(i < count)
+        {
+            r = 0;
+            un = 0;
+            p = 0;
+            while(hold[i] != '\n' && hold[i])
+            {
+                token[r] = hold[i];
+                i++;
+                r++;
+            }
+            i++;
+            while(token[un] != ':')
+            {
+                uname[un] = token[un];
+                un++;
+            }
+            p = un + 1;
+            un = 0;
+            while(token[p] != ':')
+            {
+                pass[un] = token[p];
+                p++;
+                un++;
+            }
+            p++;
+            if((strcmp(username, uname) == 0) && (strcmp(password, pass) == 0))
+            {
+                char uid[8], gid[8], dir[32], cmd[32];
+                int U, G;
+                un = 0;
+                while(token[p] != ':')
+                {
+                    uid[un] = token[p];
+                    p++;
+                    un++;
+                }
+                un = 0;
+                p++;
+                while(token[p] != ':')
+                {
+                    gid[un] = token[p];
+                    p++;
+                    un++;
+                }
+                p++;
+                un = 0;
+                U = atoi(uid);
+                G = atoi(gid);
+                while(token[p] != ' ')
+                {
+                    p++;
+                }
+                while(token[p] != ':')
+                {
+                    p++;
+                }
+                p++;
+                while(token[p] != ':')
+                {
+                    dir[un] = token[p];
+                    un++;
+                    p++;
+                }
+                p++;
+                un = 0;
+                // command
+                while(token[p])
+                {
+                    cmd[un] = token[p];
+                    un++;
+                    p++;
+                }
+                chuid(U,G);
+                chdir(dir);
+
+                close(fd);
+
+                exec("sh");
+                return 1;
+
+            }
+            memset(uname, 0, 64);
+            memset(pass, 0, 64);
+        }
+        memset(password, 0, 64);
+        memset(username, 0, 64);
+    }
+}
+
+//L2U.C
+
+#include "ucode.c"
+
+char buf[1024];
+char buf2[1024];
+char string[128];
+char tty[32];
+
+char* lower = "abcdefghijklmnopqrstuvwxyz";
+char* upper = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+int convert(char c) {
+  int i = 0;
+  while(lower[i]) {
+
+    if (lower[i] == c)
+      return upper[i];
+
+    i++;
+  }
+  return -1;  // not found
+}
+
+
+int main(int argc, char *argv[ ]) {
+  int n;
+  int in, out;
+  int i, j;
+
+  gettty(tty);
+  int outtty = open(tty, O_WRONLY);
+
+  // STDIN
+  if (argc == 1)
+  {
+    in = 0;
+    out = 1;
+  }
+  // FILE
+  else
+  {
+    in = open(argv[1], O_RDONLY);
+    out = 1;
+  }
+
+  i = j = 0;
+  char last;
+
+  // main loop
+  while(1)
+  {
+    n = read(in, buf, 1);      // read from input
+    if (n < 1)
+     break;        // if no data, break
+
+    string[i] = buf[0];
+
+    int c = convert(buf[0]);
+    if (c != -1)
+    {
+      string[i] = c;
+      buf[0] = c;
+    }
+
+
+    if (!in)
+      write(outtty, buf, 1);
+
+    if (string[i] == 10) // 10 == '\n';
+    {
+      string[++i] = '\r';        // 13 == '\r';
+
+      write(out, string, i);
+      write(outtty, "\n\r", 1);
+
+      memset(string, 0, 128);
+      i = 0;
+    }
+
+    // STDIN user presses "enter"
+    else if (string[i] == 13 && !in)
+    {
+      string[i++] = 10;
+      string[i++] = 13;
+      write(outtty, "\r\n", 2);
+      write(out, string, i);
+      memset(string, 0, 128);
+      i = 0;
+    }
+
+    else
+      i++;
+  }
+
+  close(in); close(out); close(outtty);
+}
+
+//SH.C
+
+#include "ucode.c"
+
+char *newargs[10];
+char *iargs[10];
+int icount;
+int parseCount;
+
+
+int finddelim(char *line, char delim)
+{
+    char *cp;
+    cp = line;
+    int ret = 0;
+    while(*cp && *cp != delim)
+    {
+        *cp++;
+        ret++;
+    }
+    return ret;
+}
+
+void tokenize2(char *line, char delim)
+{
+  char *cp;
+  cp = line;
+  icount = 0;
+  
+  while (*cp != 0){
+       while (*cp == delim) *cp++ = 0;        
+       if (*cp != 0)
+           iargs[icount++] = cp;         
+       while (*cp != delim && *cp != 0) cp++;                  
+       if (*cp != 0)   
+           *cp = 0;                   
+       else 
+            break; 
+       cp++;
+  }
+  iargs[icount] = 0;
+}
+
+void correctInput2(int num)
+{
+    char *cp;
+    cp = iargs[num];
+    while(*cp == ' ')
+    {
+        *cp++;
+    }
+    iargs[num] = cp;
+}
+
+int do_indirects(int n)
+{
+    int len = strlen(newargs[n]);
+    int i =0, check, fd;
+    char hold[64];
+    strcpy(hold, newargs[n]);
+    check = finddelim(hold, '<');
+    if(check == len)
+    {
+        check = finddelim(hold, '>');
+
+        if(check == len)
+            return exec(newargs[n]);
+
+        else if(newargs[n][check+1] == '>')
+        {
+            memset(hold, 0, 64);
+            strcpy(hold, newargs[n]);
+            tokenize2(hold, '>');
+
+            for(i = 0; i < icount; i++)
+                correctInput2(i);
+
+            fd = open(iargs[1], O_WRONLY | O_CREAT | O_APPEND);
+
+            if(fd < 0)
+                exit(1);
+
+            dup2(fd, 1);
+            close(fd);
+            return exec(iargs[0]);
+        }
+        else
+        {
+            memset(hold, 0, 64);
+            strcpy(hold, newargs[n]);
+            tokenize2(hold, '>');
+
+            for(i = 0; i < icount; i++)
+                correctInput2(i);
+
+            fd = open(iargs[1], O_WRONLY | O_CREAT);
+
+            if(fd < 0)
+                exit(1);
+
+            dup2(fd, 1);
+            close(fd);
+            return exec(iargs[0]);
+        }
+    }
+    else
+    {
+        memset(hold, 0, 64);
+        strcpy(hold, newargs[n]);
+        tokenize2(hold, '<');
+        for(i = 0; i < icount; i++)
+        {
+            correctInput2(i);
+        }
+        fd = open(iargs[1], O_RDONLY);
+        if(fd < 0)
+        {
+            exit(1);
+        }
+        dup2(fd, 0);
+        close(fd);
+        return exec(iargs[0]);
+    }
+}
+
+void tokenize(char *line, char delim)
+{
+  char *cp;
+  cp = line;
+  parseCount = 0;
+
+  while (*cp != 0){
+       while (*cp == delim)
+            *cp++ = 0;
+
+       if (*cp != 0)
+           newargs[parseCount++] = cp;
+
+       while (*cp != delim && *cp != 0)
+            cp++;
+
+       if (*cp != 0)
+           *cp = 0;
+       else
+            break;
+
+       cp++;
+  }
+  newargs[parseCount] = 0;
+}
+
+void correctInput(int num)
+{
+    char *cp;
+    cp = newargs[num];
+
+    while(*cp == ' ')
+        *cp++;
+
+    newargs[num] = cp;
+}
+
+int do_pipe(int o, int t)//intially 0,1
+{
+    int i = 1;
+    int pid, pd[2];
+    int status;
+
+    for(i = 1; i < parseCount; i++)
+        correctInput(i);
+
+    pipe(pd);
+
+    pid = fork();
+    if(pid)
+    {
+        close(pd[1]); 
+        dup2(pd[0], 0);
+
+        if(t < parseCount - 1)//checks to see if there are more than one pipe
+            do_pipe(t, t+1);//recursively process pipes
+
+        do_indirects(t);//only one pipe
+    }
+    else
+    {
+        close(pd[0]); 
+        dup2(pd[1], 1);
+        do_indirects(o);
+    }
+}
+
+int execute(char *command)
+{
+    char hold[128];
+    strcpy(hold, command);
+    tokenize(hold, '|');//tokenize for pipes
+    if(parseCount > 1)//pipes exist in current command
+    {
+        return do_pipe(0, 1);
+    }
+    return do_indirects(0);
+}
+
+
+int main(int argc, char *argv[ ])
+{
+    char command[128], *token, splitCommand[128], cur[128];
+    int shell = getpid(), pid, status, id;
+    // Main shell loop, never ends.
+    while(1)
+    {
+        memset(command, 0, 128);
+
+        while(!command[0])//print to screen and await input
+        {
+            printf("Ryan's sh #%d : ", shell);
+            gets(command);
+        }
+
+        if(strcmp(command, "logout") == 0)
+            exit(1);
+
+        if(strcmp(command, "") == 0)
+            continue;
+
+        strcpy(splitCommand, command);
+        tokenize(splitCommand, ' ');//break command apart
+
+        if(strcmp(newargs[0], "cd") == 0)
+        {
+            if(newargs[1])
+                chdir(newargs[1]);
+
+            else
+                chdir("/");
+
+            continue;
+        }
+        if(strcmp(newargs[0], "pwd") == 0)
+        {
+            pwd();
+            continue;
+        }
+
+        pid = fork();
+
+        if(pid)
+            pid = wait(&status);//wait for proc to die
+
+        else
+        {
+            strcpy(cur, command);
+
+            id = execute(cur);
+
+            if(id == -1)//commmand failed
+                exit(1);
+        }
+    }
+}
+
+
+//MORE.C
+
+#include "ucode.c"
+
+#define ROWS 20
+#define COLUMNS  80
+
+void print(int fd, int lines)
+{
+	int i, j, size;
+	char c;
+
+	for (i = 0; i < lines; i++)
+	{
+		for (j = 0; j < COLUMNS; j++)
+		{
+			size = read(fd, &c, 1);
+			printc(c);
+
+			if (size < 1)
+				exit(0);
+
+			if (c == '\n' || c == '\r')
+				break;
+		}
+	}
+
+	printc('\n');
+}
+int main(int argc, char *argv[])
+{
+	char c, tty[64];
+	int fd;
+
+	if (argc == 1)
+	{
+		fd = dup(0);
+		close(0);
+		gettty(tty);
+		open(tty, O_RDONLY);
+	}
+
+	else
+		fd = open(argv[1], O_RDONLY);
+
+	if (fd < 0)
+	{
+		printf("File not found!\n");
+		return -1;
+	}
+
+	while (1)
+	{
+		print(fd, ROWS);
+
+		while (1)
+		{
+			c = getc();
+
+			switch (c)
+			{
+				case '\r':
+				case '\n':
+					print(fd, 1);
+					break;
+				case ' ':
+					print(fd, ROWS);
+					break;
+				case 'q':
+					printc('\n');
+					return 0;
+					break;
+			}
+		}
+	}
+
+	return 0;
+}
+
+
+//LS.C
+
+#include "ucode.c"
+
+#define	S_ISDIR(m)	((m & 0170000) == 0040000)	
+#define	S_ISCHR(m)	((m & 0170000) == 0020000)
+#define	S_ISBLK(m)	((m & 0170000) == 0060000)
+#define	S_ISREG(m)	((m & 0170000) == 0100000)
+
+int ls_file(char *path) {
+
+	static const char *permissions = "rwxrwxrwx";
+	STAT st;
+
+	printf("%s ", path);
+	stat(path, &st);
+
+	switch(st.st_mode & 0xF000)
+	{
+		case 0x8000:  putchar('-');     break; // 0x8 = 1000
+		case 0x4000:  putchar('d');     break; // 0x4 = 0100
+		case 0xA000:  putchar('l');     break; // oxA = 1010
+		default:      putchar('?');     break;
+	}
+
+	for(int i = 0; i < strlen(permissions); i++)
+		putchar(st.st_mode & (1 << (strlen(permissions) - 1 - i)) ? permissions[i] : '-');
+
+
+
+	printf("%d %d %d %d\n", st.st_nlink, st.st_gid, st.st_uid, st.st_size);
+
+}
+
+int ls_dir(char *path) {
+
+	int fd, n, i;
+	DIR *dp;
+	char buf[1024], name[255], *cp;
+
+	fd = open(path, 0);
+
+	if(fd >= 0)
+	{
+		while( (n = read(fd, buf, 1024)) ) {
+			cp = buf;
+
+			while(cp < buf + 1024) {
+				dp = (DIR *)cp;
+
+				for(i = 0; i < dp->name_len; i++)
+					name[i] = dp->name[i];
+
+
+
+				name[i] = '\0';
+				ls_file(name);
+				cp += dp->rec_len;
+				dp = (DIR *)cp;
+			}
+		}
+		return 0;
+	}
+
+	printf("%s does not exist!\n", path);
+	return -1;
+
+}
+int main(int argc, char *argv[]) {
+
+	STAT st;
+	char *path;
+
+	if(argc < 2)
+		return ls_dir(".");	
+	else
+		path = argv[1];
+
+	stat(path, &st);
+
+	if( S_ISDIR(st.st_mode) )
+		ls_dir(argv[1]);
+	
+	else if ( S_ISREG(st.st_mode) )
+		ls_file(argv[1]);
+	
+	return 0;
+
+
+}

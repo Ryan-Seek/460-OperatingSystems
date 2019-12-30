@@ -1,0 +1,14 @@
+Ryan Seek
+11429944
+CS460
+prelab3
+
+3)
+
+6. at Rgetc() -> key pressed in kbd. 5. program has to get the char that was pressed
+5. at while(data == 0) ->kbd loads the register of the interrupt address
+1. ----------> 2. interrupt is generated
+2. ----------> 3. The interrupt handler is called when an interrupt is generated.  This gets the scancode from the KBD data port.
+3. at kbd.handler() -> turns scancode into actual ASCII then puts the char into the buf
+4. ---> 2. ----> 5. descends down call stack
+5. at return c -> 6. there is a char in the buf that we need to return, this is because data != 0

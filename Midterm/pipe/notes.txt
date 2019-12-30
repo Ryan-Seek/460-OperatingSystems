@@ -1,0 +1,56 @@
+int pipe_writer()
+{
+  struct uart *up = &uart[0];
+  char line[128];
+  while(1)
+  {
+    uprintf("Enter a line for task1 to get: ");
+    printf("task%d waits for line from UART0\n", running->pid);
+    ugets(up, line);
+    uprints(up,"\r\n");
+    printf("task%d writes line= [%s] to pipe\n", running->pid, line);
+    write_pipe(kpipe, line, strlen(line));
+  }
+}
+
+int pipe_reader()
+{
+  char line[128];
+  int i, n;
+
+  while(1)
+  {
+    printf("task%d read n=%d bytes from pipe: [", running->pid, n);
+    n = read_pipe(kpipe, line, 20);
+    printf("task%d rad n = bytes from pipe: [", running->pid, n);
+
+    for(i = 0; i<n; i++)
+    {
+      kputc(line[i]);
+    }
+
+    printf("\n");
+  }
+}
+
+int main()
+{
+  fbuf_init();
+  kprintf("Welcome to my version of WANIX\n");
+
+  uart_init();
+  kbd_init();
+  pipe_init();
+  kpipe = create_pipe();
+  kernel_init();
+  kprintf("P0 kfork tasks\n");
+  kfork((int)pipe_writer, 1);
+  kfork((int)pipe_reader, 1);
+
+  while(1)
+  {
+    if(readyQueue)
+      tswitch();
+  }
+
+}
